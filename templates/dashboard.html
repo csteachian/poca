@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Pocket Clone{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <div class="add-article-section">
+        <h2>Save New Article</h2>
+        <form method="POST" action="{{ url_for('add_article') }}" class="add-form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="url">URL:</label>
+                    <input type="url" id="url" name="url" placeholder="https://example.com/article" required>
+                </div>
+                <div class="form-group">
+                    <label for="title">Title (optional):</label>
+                    <input type="text" id="title" name="title" placeholder="Custom title (will auto-extract if empty)">
+                </div>
+                <button type="submit" class="btn btn-primary">Save Article</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="articles-section">
+        <h2>Your Saved Articles ({{ articles|length }})</h2>
+        
+        {% if articles %}
+            <div class="articles-list">
+                {% for article in articles %}
+                <div class="article-item">
+                    <div class="article-content">
+                        <h3 class="article-title">
+                            <a href="{{ url_for('view_article', article_id=article.id) }}">
+                                {{ article.title }}
+                            </a>
+                        </h3>
+                        <p class="article-url">
+                            <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">
+                                {{ article.url }}
+                            </a>
+                        </p>
+                        <p class="article-date">
+                            Saved on {{ article.added_at }}
+                        </p>
+                    </div>
+                    <div class="article-actions">
+                        <a href="{{ url_for('view_article', article_id=article.id) }}" class="btn btn-secondary btn-small">View</a>
+                        <a href="{{ article.url }}" target="_blank" class="btn btn-primary btn-small">Open</a>
+                        <a href="{{ url_for('delete_article', article_id=article.id) }}" 
+                           class="btn btn-danger btn-small"
+                           onclick="return confirm('Are you sure you want to delete this article?')">Delete</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No articles saved yet. Add your first article above!</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
