@@ -6,9 +6,23 @@ from datetime import datetime
 import requests
 from urllib.parse import urlparse
 import re
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf.csrf import CSRFProtect
+import socket
+import ipaddress
+import logging
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.WARNING)
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this-in-production'
+CSRFProtect(app)
+app.secret_key = os.environ.get('SECRET_KEY') or 'dev-only-key'
+
+app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # Database initialization
 def init_db():
@@ -40,8 +54,31 @@ def init_db():
     conn.commit()
     conn.close()
 
+
+# CSRF in-dept defense. Avoids CSRF-TOKEN from being cached by CDNS
+@app.after_request
+def add_header(response):
+    if response.content_type and 'text/html' in response.content_type:
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+    return response
+
 def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+    return generate_password_hash(password)
+
+
+def is_host_safe(host):
+     try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False 
+
+    for family, _, _, _, sockaddr in infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False  
+    return True
+    
 
 def get_db_connection():
     conn = sqlite3.connect('pocket_clone.db')
@@ -50,25 +87,51 @@ def get_db_connection():
 
 def extract_title_from_url(url):
     """Try to extract title from URL or use a simple fallback"""
+    response = None
     try:
-        # Add http:// if no protocol specified
-        if not url.startswith(('http://', 'https://')):
+
+            
+        parsed = urlparse(url)
+        if not parsed.scheme:
             url = 'http://' + url
-        
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
+            parsed = urlparse(url)
+        if parsed.scheme in ('http', 'https'):
+            host = parsed.hostname
+            if host:
+                if is_host_safe(host):
+                    response = requests.get(url, timeout=5, allow_redirects=True)
+                    for r in response.history:
+                        location = r.headers.get('Location')
+                        if not location:
+                            continue
+                        redirected_host = urlparse(location).hostname
+                        if not redirected_host or not is_host_safe(redirected_host):
+                            logger.warning("Blocked SSRF via redirect: %s -> %s", url, location)
+                            return parsed.netloc or url
+                        
+                else:
+                    logger.warning("Blocked SSRF attempt or invalid host: %s", url)
+                    return parsed.netloc or url
+
+            else:
+                logger.warning("Empty  host or could not resolve: %s", url)
+                return parsed.netloc or url
+       
+    
+            
+        if response and response.status_code == 200:
             # Simple regex to extract title from HTML
             title_match = re.search(r'<title[^>]*>([^<]+)</title>', response.text, re.IGNORECASE)
             if title_match:
                 return title_match.group(1).strip()
-    except:
+    except Exception:
         pass
     
     # Fallback: use domain name or URL
     try:
         parsed = urlparse(url)
         return parsed.netloc or url
-    except:
+    except Exception:
         return url
 
 @app.route('/')
@@ -117,15 +180,15 @@ def login():
         conn = get_db_connection()
         user = conn.execute('SELECT id, username, password_hash FROM users WHERE username = ?', 
                            (username,)).fetchone()
-        conn.close()
         
-        if user and user['password_hash'] == hash_password(password):
+        if user and check_password_hash(user['password_hash'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
+            conn.close()
             return redirect(url_for('dashboard'))
         else:
             flash('Invalid username or password')
-    
+    conn.close()
     return render_template('login.html')
 
 @app.route('/logout')
@@ -177,7 +240,7 @@ def add_article():
     flash('Article saved successfully!')
     return redirect(url_for('dashboard'))
 
-@app.route('/delete_article/<int:article_id>')
+@app.route('/delete_article/<int:article_id>', methods=['POST'])
 def delete_article(article_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -212,4 +275,4 @@ def view_article(article_id):
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True)
+    app.run(debug=os.environ.get('FLASK_DEBUG') == '1')
