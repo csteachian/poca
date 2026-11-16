@@ -28,7 +28,7 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 def init_db():
     conn = sqlite3.connect('pocket_clone.db')
     cursor = conn.cursor()
-    
+
     # Create users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -38,7 +38,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
     # Create articles table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS articles (
@@ -50,7 +50,7 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     conn.commit()
     conn.close()
 
@@ -67,18 +67,18 @@ def hash_password(password):
 
 
 def is_host_safe(host):
-     try:
+    try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
-        return False 
+        return False
 
     for family, _, _, _, sockaddr in infos:
         ip = ipaddress.ip_address(sockaddr[0])
         if (ip.is_private or ip.is_loopback or ip.is_link_local
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            return False  
+            return False
     return True
-    
+
 
 def get_db_connection():
     conn = sqlite3.connect('pocket_clone.db')
@@ -90,7 +90,7 @@ def extract_title_from_url(url):
     response = None
     try:
 
-            
+
         parsed = urlparse(url)
         if not parsed.scheme:
             url = 'http://' + url
@@ -108,7 +108,7 @@ def extract_title_from_url(url):
                         if not redirected_host or not is_host_safe(redirected_host):
                             logger.warning("Blocked SSRF via redirect: %s -> %s", url, location)
                             return parsed.netloc or url
-                        
+
                 else:
                     logger.warning("Blocked SSRF attempt or invalid host: %s", url)
                     return parsed.netloc or url
@@ -116,9 +116,9 @@ def extract_title_from_url(url):
             else:
                 logger.warning("Empty  host or could not resolve: %s", url)
                 return parsed.netloc or url
-       
-    
-            
+
+
+
         if response and response.status_code == 200:
             # Simple regex to extract title from HTML
             title_match = re.search(r'<title[^>]*>([^<]+)</title>', response.text, re.IGNORECASE)
@@ -126,7 +126,7 @@ def extract_title_from_url(url):
                 return title_match.group(1).strip()
     except Exception:
         pass
-    
+
     # Fallback: use domain name or URL
     try:
         parsed = urlparse(url)
@@ -145,30 +145,30 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        
+
         if not username or not password:
             flash('Username and password are required')
             return render_template('register.html')
-        
+
         conn = get_db_connection()
-        
+
         # Check if username already exists
         existing_user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
         if existing_user:
             flash('Username already exists')
             conn.close()
             return render_template('register.html')
-        
+
         # Create new user
         password_hash = hash_password(password)
-        conn.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', 
+        conn.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)',
                     (username, password_hash))
         conn.commit()
         conn.close()
-        
+
         flash('Registration successful! Please log in.')
         return redirect(url_for('login'))
-    
+
     return render_template('register.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -176,11 +176,11 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        
+
         conn = get_db_connection()
-        user = conn.execute('SELECT id, username, password_hash FROM users WHERE username = ?', 
+        user = conn.execute('SELECT id, username, password_hash FROM users WHERE username = ?',
                            (username,)).fetchone()
-        
+
         if user and check_password_hash(user['password_hash'], password):
             session['user_id'] = user['id']
             session['username'] = user['username']
@@ -188,7 +188,7 @@ def login():
             return redirect(url_for('dashboard'))
         else:
             flash('Invalid username or password')
-    conn.close()
+        conn.close()
     return render_template('login.html')
 
 @app.route('/logout')
@@ -200,43 +200,43 @@ def logout():
 def dashboard():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
     conn = get_db_connection()
     articles = conn.execute('''
-        SELECT id, title, url, added_at 
-        FROM articles 
-        WHERE user_id = ? 
+        SELECT id, title, url, added_at
+        FROM articles
+        WHERE user_id = ?
         ORDER BY added_at DESC
     ''', (session['user_id'],)).fetchall()
     conn.close()
-    
+
     return render_template('dashboard.html', articles=articles, username=session['username'])
 
 @app.route('/add_article', methods=['POST'])
 def add_article():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
     url = request.form['url'].strip()
     custom_title = request.form.get('title', '').strip()
-    
+
     if not url:
         flash('URL is required')
         return redirect(url_for('dashboard'))
-    
+
     # Use custom title if provided, otherwise extract from URL
     title = custom_title if custom_title else extract_title_from_url(url)
-    
+
     # Add http:// if no protocol specified
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url
-    
+
     conn = get_db_connection()
-    conn.execute('INSERT INTO articles (user_id, title, url) VALUES (?, ?, ?)', 
+    conn.execute('INSERT INTO articles (user_id, title, url) VALUES (?, ?, ?)',
                 (session['user_id'], title, url))
     conn.commit()
     conn.close()
-    
+
     flash('Article saved successfully!')
     return redirect(url_for('dashboard'))
 
@@ -244,13 +244,13 @@ def add_article():
 def delete_article(article_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
     conn = get_db_connection()
-    conn.execute('DELETE FROM articles WHERE id = ? AND user_id = ?', 
+    conn.execute('DELETE FROM articles WHERE id = ? AND user_id = ?',
                 (article_id, session['user_id']))
     conn.commit()
     conn.close()
-    
+
     flash('Article deleted successfully!')
     return redirect(url_for('dashboard'))
 
@@ -258,19 +258,19 @@ def delete_article(article_id):
 def view_article(article_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
     conn = get_db_connection()
     article = conn.execute('''
-        SELECT id, title, url, added_at 
-        FROM articles 
+        SELECT id, title, url, added_at
+        FROM articles
         WHERE id = ? AND user_id = ?
     ''', (article_id, session['user_id'])).fetchone()
     conn.close()
-    
+
     if not article:
         flash('Article not found')
         return redirect(url_for('dashboard'))
-    
+
     return render_template('view_article.html', article=article)
 
 if __name__ == '__main__':
